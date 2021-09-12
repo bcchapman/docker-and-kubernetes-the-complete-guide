@@ -1,0 +1,33 @@
+version: "3.7"
+
+services:
+  frontend:
+    build: 
+      context: frontend
+      dockerfile: Dockerfile
+    ports:
+      - 8080:80
+    volumes: 
+      - /app/node_modules
+      - ./frontend/:/app
+
+  frontend-dev:
+    build: 
+      context: frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - 3000:3000
+    volumes: 
+      - /app/node_modules
+      - ./frontend/:/app
+    profiles: ["local"]
+  
+  test:
+    build: 
+      context: frontend
+      dockerfile: Dockerfile.dev
+    volumes: 
+      - /app/node_modules
+      - ./frontend/:/app
+    command: ["npm", "run", "test"]
+    profiles: ["local"]
