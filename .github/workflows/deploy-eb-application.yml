@@ -1,0 +1,63 @@
+name: Deploy to Elasticbeanstalk
+
+on:
+  push:
+    paths:
+      - "Section 6/workflow/**"
+      - .github/workflows/deploy-eb-application.yml
+
+env:
+  REGISTRY: bcchapman
+  IMAGE_NAME: ${{ github.repository }}
+
+defaults:
+  run:
+    working-directory: "Section 6/workflow"
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        node-version: [14.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: Build Frontend Application
+        run: npm install
+        working-directory: "Section 6/workflow/frontend"
+      
+      - name: Run Frontend Test Coverage
+        run: npm run test -- --coverage
+        working-directory: "Section 6/workflow/frontend"
+
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        name: Generate deployment package
+        run: zip -r deploy.zip docker-compose.yaml frontend -x "*node_modules*" -x "*coverage*"
+
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        name: Get timestamp
+        id: timestamp
+        run: echo "::set-output name=date::$(date +'%Y-%m-%dT%H-%M-%S-%3NZ')"  
+
+      - if: ${{ github.ref == 'refs/heads/main' }}
+        name: Deploy to AWS
+        uses: einaregilsson/beanstalk-deploy@v14
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws_secret_key: ${{ secrets.AWS_ACCESS_SECRET_KEY }}
+          application_name: workflow
+          environment_name: Workflow-env-1
+          version_label: workflow-frontend-${{ matrix.node-version }}-${{ steps.timestamp.outputs.date }}
+          region: us-east-1
+          deployment_package: "Section 6/workflow/deploy.zip"
