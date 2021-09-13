@@ -7,8 +7,7 @@ on:
       - .github/workflows/deploy-eb-application.yml
 
 env:
-  REGISTRY: bcchapman
-  IMAGE_NAME: ${{ github.repository }}
+  REGISTRY: ${{ secrets.DOCKER_HUB_NAMESPACE }}
 
 defaults:
   run:
@@ -28,6 +27,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
+      - name: Extract repository name
+        run: echo "REPOSITORY_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_ENV
+        shell: bash
+
       - name: Setup Node
         uses: actions/setup-node@v1
         with:
@@ -45,7 +48,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v3
         with:
-          images: ${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY_NAME }}
           flavor: |
             prefix=workflow-frontend-
             suffix=-${{ matrix.node-version }}
@@ -64,23 +67,31 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # - if: ${{ github.ref == 'refs/heads/main' }}
-      #   name: Generate deployment package
-      #   run: zip -r deploy.zip docker-compose.yaml frontend -x "*node_modules*" -x "*coverage*"
+      - name: Create docker-compose file
+        uses: franzbischoff/replace_envs@v1
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPOSITORY_NAME: ${{ env.REPOSITORY_NAME }}
+          FRONT_END_IMAGE_TAG: ${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+        with:
+          from_file: 'Section 6/workflow/docker-compose.yaml'
+          to_file: 'Section 6/workflow/docker-compose.yaml'
+          commit: 'false'
 
-      # - if: ${{ github.ref == 'refs/heads/main' }}
-      #   name: Get timestamp
-      #   id: timestamp
-      #   run: echo "::set-output name=date::$(date +'%Y-%m-%dT%H-%M-%S-%3NZ')"  
+      - name: Generate deployment package
+        run: zip -r deploy.zip docker-compose.yaml
 
-      # - if: ${{ github.ref == 'refs/heads/main' }}
-      #   name: Deploy to AWS
-      #   uses: einaregilsson/beanstalk-deploy@v14
-      #   with:
-      #     aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
-      #     aws_secret_key: ${{ secrets.AWS_ACCESS_SECRET_KEY }}
-      #     application_name: workflow
-      #     environment_name: Workflow-env-1
-      #     version_label: workflow-frontend-${{ matrix.node-version }}-${{ steps.timestamp.outputs.date }}
-      #     region: us-east-1
-      #     deployment_package: "Section 6/workflow/deploy.zip"
+      - name: Get timestamp
+        id: timestamp
+        run: echo "::set-output name=date::$(date +'%Y-%m-%dT%H-%M-%S-%3NZ')"  
+
+      - name: Deploy to AWS
+        uses: einaregilsson/beanstalk-deploy@v14
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws_secret_key: ${{ secrets.AWS_ACCESS_SECRET_KEY }}
+          application_name: workflow
+          environment_name: Workflow-env
+          version_label: workflow-frontend-${{ matrix.node-version }}-${{ steps.timestamp.outputs.date }}
+          region: us-east-1
+          deployment_package: "Section 6/workflow/deploy.zip"
