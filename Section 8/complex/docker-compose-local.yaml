@@ -1,0 +1,71 @@
+version: "3.7"
+
+services:  
+  redis:
+    image: redis:alpine
+
+  postgres:
+    image: postgres:alpine
+    restart: always
+    environment:
+      POSTGRES_USER: example
+      POSTGRES_PASSWORD: example
+
+  adminer:
+    image: adminer
+    restart: always
+    ports:
+      - 8081:8080
+
+  nginx:
+    restart: always
+    build:
+      dockerfile: Dockerfile
+      context: ./nginx
+    ports:
+      - '3050:80'
+    depends_on: 
+      - api
+      - client
+
+  client:
+    build: 
+      context: client
+      dockerfile: Dockerfile.dev
+    volumes: 
+      - /app/node_modules
+      - ./client/:/app
+    depends_on: 
+      - api
+
+  api:
+    build:
+      context: server
+      dockerfile: Dockerfile.dev
+    environment: 
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PG_USER: example
+      PG_PASSWORD: example
+      PG_HOST: postgres
+      PG_DATABASE: postgres
+      PG_PORT: 5432 
+    volumes: 
+      - /app/node_modules
+      - ./server/:/app
+    depends_on: 
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: worker
+      dockerfile: Dockerfile.dev
+    environment: 
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes: 
+      - /app/node_modules
+      - ./worker/:/app
+    depends_on: 
+      - redis
