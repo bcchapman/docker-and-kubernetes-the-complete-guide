@@ -1,0 +1,151 @@
+name: Deploy to Elasticbeanstalk
+
+on:
+  push:
+    paths:
+      - "Section 8/complex/**"
+      - .github/workflows/deploy-eb-application-complex.yml
+
+env:
+  REGISTRY: ${{ secrets.DOCKER_HUB_NAMESPACE }}
+
+defaults:
+  run:
+    working-directory: "Section 8/complex"
+
+jobs:
+  build-and-push-image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        node-version: [14.x]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Extract repository name
+        run: echo "REPOSITORY_NAME=$(echo '${{ github.repository }}' | awk -F '/' '{print $2}')" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Setup Node
+        uses: actions/setup-node@v1
+        with:
+          node-version: ${{ matrix.node-version }}
+      
+      - name: Build Test Application
+        run: npm install
+        working-directory: "Section 8/complex/client"
+      
+      - name: Run Frontend Test Coverage
+        run: npm run test -- --coverage
+        working-directory: "Section 8/complex/client"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata (tags, labels) for NGINX Docker
+        id: meta-nginx
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY_NAME }}
+          flavor: |
+            prefix=complex-nginx-
+            suffix=-${{ matrix.node-version }}
+
+      - name: Build and push NGINX Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: "Section 8/complex/nginx"
+          push: true
+          tags: ${{ steps.meta-nginx.outputs.tags }}
+          labels: ${{ steps.meta-nginx.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for Client Docker
+        id: meta-client
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY_NAME }}
+          flavor: |
+            prefix=complex-client-
+            suffix=-${{ matrix.node-version }}
+
+      - name: Build and push Client Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: "Section 8/complex/client"
+          push: true
+          tags: ${{ steps.meta-client.outputs.tags }}
+          labels: ${{ steps.meta-client.outputs.labels }}
+
+      - name: Extract metadata (tags, labels) for Server Docker
+        id: meta-server
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY_NAME }}
+          flavor: |
+            prefix=complex-server-
+            suffix=-${{ matrix.node-version }}
+
+      - name: Build and push Server Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: "Section 8/complex/server"
+          push: true
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
+      
+      - name: Extract metadata (tags, labels) for Worker Docker
+        id: meta-worker
+        uses: docker/metadata-action@v3
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REPOSITORY_NAME }}
+          flavor: |
+            prefix=complex-worker-
+            suffix=-${{ matrix.node-version }}
+
+      - name: Build and push Worker Docker image
+        uses: docker/build-push-action@v2
+        with:
+          context: "Section 8/complex/worker"
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          
+      - name: Create docker-compose file
+        uses: franzbischoff/replace_envs@v1
+        env:
+          REGISTRY: ${{ env.REGISTRY }}
+          REPOSITORY_NAME: ${{ env.REPOSITORY_NAME }}
+          CLIENT_IMAGE_TAG: ${{ fromJSON(steps.meta-client.outputs.json).labels['org.opencontainers.image.version'] }}
+          NGINX_IMAGE_TAG: ${{ fromJSON(steps.meta-nginx.outputs.json).labels['org.opencontainers.image.version'] }}
+          SERVER_IMAGE_TAG: ${{ fromJSON(steps.meta-server.outputs.json).labels['org.opencontainers.image.version'] }}
+          WORKER_IMAGE_TAG: ${{ fromJSON(steps.meta-worker.outputs.json).labels['org.opencontainers.image.version'] }}
+        with:
+          from_file: 'Section 8/complex/docker-compose.yaml'
+          to_file: 'Section 8/complex/docker-compose.yaml'
+          commit: 'false'
+
+      - name: Generate deployment package
+        run: zip -r deploy.zip docker-compose.yaml
+
+      - name: Get timestamp
+        id: timestamp
+        run: echo "::set-output name=date::$(date +'%Y-%m-%dT%H-%M-%S-%3NZ')"  
+
+      - name: Deploy to AWS
+        uses: einaregilsson/beanstalk-deploy@v14
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY }}
+          aws_secret_key: ${{ secrets.AWS_ACCESS_SECRET_KEY }}
+          application_name: complex
+          environment_name: complex-env
+          version_label: workflow-frontend-${{ matrix.node-version }}-${{ steps.timestamp.outputs.date }}
+          region: us-east-1
+          deployment_package: "Section 8/complex/deploy.zip"

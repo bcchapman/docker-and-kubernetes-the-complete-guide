@@ -1,0 +1,52 @@
+version: "3.7"
+
+services:  
+  redis:
+    image: redis:alpine
+
+  postgres:
+    image: postgres:alpine
+    restart: always
+    environment:
+      POSTGRES_USER: example
+      POSTGRES_PASSWORD: example
+
+  adminer:
+    image: adminer
+    restart: always
+
+  nginx:
+    restart: always
+    image: bcchapman/docker-and-kubernetes-the-complete-guide:complex-nginx-feature-addComplexApplication-14.x
+    ports:
+      - '80:80'
+    depends_on: 
+      - api
+      - client
+
+  client:
+    image: bcchapman/docker-and-kubernetes-the-complete-guide:complex-client-feature-addComplexApplication-14.x
+    depends_on: 
+      - api
+
+  api:
+    image: bcchapman/docker-and-kubernetes-the-complete-guide:complex-server-feature-addComplexApplication-14.x
+    environment: 
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      PG_USER: example
+      PG_PASSWORD: example
+      PG_HOST: postgres
+      PG_DATABASE: postgres
+      PG_PORT: 5432 
+    depends_on: 
+      - postgres
+      - redis
+
+  worker:
+    image: bcchapman/docker-and-kubernetes-the-complete-guide:complex-worker-feature-addComplexApplication-14.x
+    environment: 
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on: 
+      - redis
